@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>web-to-epub</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main>
+    <header class="masthead">
+      <h1>web-to-epub</h1>
+      <p class="lede">Drop Markdown or text files, put them in order, and build an EPUB.</p>
+    </header>
+
+    <form id="form" novalidate>
+      <section aria-labelledby="files-h" class="step">
+        <h2 id="files-h"><span class="step-no" aria-hidden="true">1</span>Chapters</h2>
+        <div id="dropzone" class="dropzone" tabindex="0" role="button"
+             aria-label="Add chapter files. Drop files here or press Enter or Space to open the file picker."
+             aria-describedby="dz-hint">
+          <svg class="dz-icon" viewBox="0 0 48 48" width="48" height="48" aria-hidden="true" focusable="false">
+            <path d="M14 6h14l10 10v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+            <path d="M28 6v10h10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+            <path d="M24 35V24m0 0l-4.5 4.5M24 24l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="dz-title"><strong>Drop files here</strong> or click to browse</span>
+          <span id="dz-hint" class="hint">.md, .markdown or .txt</span>
+        </div>
+        <input id="file-input" type="file" multiple hidden accept=".md,.markdown,.txt">
+        <p id="file-msg" class="msg warn" role="alert" hidden></p>
+
+        <div id="list-tools" class="tools" hidden>
+          <span id="count"></span>
+          <button type="button" id="sort-btn">Sort naturally</button>
+          <button type="button" id="clear-btn">Remove all</button>
+        </div>
+        <ol id="file-list" class="file-list" aria-label="Chapter order"></ol>
+        <p id="live" class="sr-only" aria-live="polite"></p>
+      </section>
+
+      <section aria-labelledby="meta-h" class="step">
+        <h2 id="meta-h"><span class="step-no" aria-hidden="true">2</span>Book details</h2>
+        <div class="card">
+          <div class="field">
+            <label for="title">Title <span class="req">required</span></label>
+            <input id="title" name="title" type="text" required autocomplete="off" aria-describedby="title-err">
+            <p id="title-err" class="field-err" hidden></p>
+          </div>
+          <div class="field">
+            <label for="author">Author <span class="req">required</span></label>
+            <input id="author" name="author" type="text" required autocomplete="off" aria-describedby="author-err">
+            <p id="author-err" class="field-err" hidden></p>
+          </div>
+          <details class="more">
+            <summary>More options</summary>
+            <div class="more-body">
+              <div class="field">
+                <label for="language">Language</label>
+                <input id="language" name="language" type="text" placeholder="en" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" rows="3"></textarea>
+              </div>
+              <div class="field">
+                <label for="strip_suffix">Strip suffix from chapter titles</label>
+                <input id="strip_suffix" name="strip_suffix" type="text" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="cover">Cover image</label>
+                <input id="cover" name="cover" type="file" accept="image/*">
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section aria-labelledby="build-h" class="step">
+        <h2 id="build-h"><span class="step-no" aria-hidden="true">3</span>Build</h2>
+        <button type="submit" id="build-btn" class="primary"><span class="spin" aria-hidden="true"></span><span class="label">Build EPUB</span></button>
+        <progress id="progress" hidden aria-label="Building EPUB"></progress>
+        <p id="status" class="msg" role="status" hidden></p>
+        <p id="error" class="msg error" role="alert" hidden></p>
+        <p id="warnings" class="msg warn" role="status" hidden></p>
+      </section>
+    </form>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

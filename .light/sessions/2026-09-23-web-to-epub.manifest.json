@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "session": "2026-09-23-web-to-epub",
+  "timestamp": "2026-09-24T03:08:34+00:00",
+  "workflow_steps": [
+    "plan",
+    "implement"
+  ],
+  "files_created": [
+    "CLAUDE.md",
+    "README.md",
+    "pyproject.toml",
+    "src/web_to_epub/__init__.py",
+    "src/web_to_epub/core/__init__.py",
+    "src/web_to_epub/core/epub_builder.py",
+    "src/web_to_epub/core/image_policy.py",
+    "src/web_to_epub/core/markdown_chapter.py",
+    "src/web_to_epub/core/models.py",
+    "src/web_to_epub/core/ordering.py",
+    "src/web_to_epub/core/styles.py",
+    "src/web_to_epub/shell/__init__.py",
+    "src/web_to_epub/shell/app.py",
+    "src/web_to_epub/shell/convert.py",
+    "src/web_to_epub/shell/image_fetcher.py",
+    "src/web_to_epub/shell/static/app.css",
+    "src/web_to_epub/shell/static/app.js",
+    "src/web_to_epub/shell/static/index.html",
+    "tests/__init__.py",
+    "tests/core/__init__.py",
+    "tests/core/test_epub_builder.py",
+    "tests/core/test_image_policy.py",
+    "tests/core/test_markdown_chapter.py",
+    "tests/core/test_ordering.py",
+    "tests/fixtures/substack_chapter.md",
+    "tests/shell/__init__.py",
+    "tests/shell/test_app.py",
+    "tests/shell/test_convert.py",
+    "tests/shell/test_image_fetcher.py",
+    "tests/test_smoke.py"
+  ],
+  "files_modified": [],
+  "phases_completed": 10,
+  "total_phases": 10,
+  "gates": {
+    "red_passed": 8,
+    "green_passed": 7,
+    "validate_passed": 8
+  },
+  "test_suite_passed": true
+}
