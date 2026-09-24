@@ -221,3 +221,64 @@ def test_building_twice_gives_same_chapters_toc_metadata():
     assert r1.toc_titles == r2.toc_titles == ["One", "Two"]
     for name in ("title", "creator", "language", "description"):
         assert r1.meta(name) == r2.meta(name) is not None
+
+
+# REVIEW FIXES
+
+def test_image_src_containing_ampersand_is_packaged():
+    url = "http://x.test/y.png?a=1&b=2"
+    chapters = [ch("One", img_body(url.replace("&", "&amp;")), [ImageRef(url)])]
+    r = read(build_epub(chapters, META, {url: ImageData(PNG, "image/png")}))
+    assert len(r.images()) == 1
+    assert len(srcs_of(r.chapters[0])) == 1
+
+
+def test_dropped_titled_image_takes_its_figure_with_it():
+    gone = "http://x.test/gone.png"
+    body = f'<h1>T</h1><figure><img src="{gone}" alt="a"/><figcaption>cap</figcaption></figure><p>after</p>'
+    r = read(build_epub([ch("One", body, [ImageRef(gone)])], META, {}))
+    content = r.chapters[0].get_content().decode("utf-8")
+    assert "figure" not in content and "cap" not in content
+    assert "after" in content
+
+
+def test_kept_titled_image_keeps_its_figure_and_caption():
+    url = "http://x.test/a.png"
+    body = f'<h1>T</h1><figure><img src="{url}" alt="a"/><figcaption>cap</figcaption></figure>'
+    r = read(build_epub([ch("One", body, [ImageRef(url)])], META, {url: ImageData(PNG, "image/png")}))
+    content = r.chapters[0].get_content().decode("utf-8")
+    assert "<figcaption>cap</figcaption>" in content
+    assert len(srcs_of(r.chapters[0])) == 1
+
+
+@pytest.mark.parametrize("body", ["", "   \n"])
+def test_empty_chapter_body_raises_value_error(body):
+    with pytest.raises(ValueError, match="(?i)empty"):
+        build_epub([ch("One", body)], META, {})
+
+
+@pytest.mark.parametrize("media_type", ["image/svg+xml", "image/x-icon", "image/avif", "text/plain"])
+def test_unsupported_image_types_are_dropped(media_type):
+    url = "http://x.test/a.img"
+    r = read(build_epub([ch("One", img_body(url), [ImageRef(url)])], META, {url: ImageData(b"data", media_type)}))
+    assert r.images() == {}
+    assert srcs_of(r.chapters[0]) == []
+
+
+def test_unsupported_cover_type_raises_value_error():
+    with pytest.raises(ValueError, match="(?i)cover"):
+        build_epub([ch("One")], META, {}, cover=ImageData(b"data", "application/octet-stream"))
+
+
+def _identifier(raw: bytes) -> str:
+    return read(raw).meta("identifier")
+
+
+def test_identifier_differs_for_different_content_with_same_title_and_author():
+    a = build_epub([ch("One", "<p>alpha</p>")], META, {})
+    b = build_epub([ch("One", "<p>beta</p>")], META, {})
+    assert _identifier(a) != _identifier(b)
+
+
+def test_identifier_is_stable_for_identical_input():
+    assert _identifier(build_epub([ch("One")], META, {})) == _identifier(build_epub([ch("One")], META, {}))

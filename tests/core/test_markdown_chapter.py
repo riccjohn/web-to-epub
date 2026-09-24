@@ -181,3 +181,34 @@ def test_output_always_parses_as_xml(text):
 def test_image_ref_count_equals_img_tags(parts):
     ch = parse_chapter("\n\n".join(parts), "f.md")
     assert len(ch.images) == _count_img(ch.body)
+
+
+# REVIEW FIXES
+
+def test_col_and_wbr_void_tags_are_self_closed():
+    ch = parse_chapter("<table><colgroup><col></colgroup><tr><td>a</td></tr></table>\n\nlong<wbr>word", "a.md")
+    _xml(ch.body)
+    assert "<col/>" in ch.body and "<wbr/>" in ch.body
+
+
+def test_colspan_rowspan_and_ol_start_survive():
+    ch = parse_chapter('<table><tr><td colspan="2" rowspan="3">a</td></tr></table>\n\n<ol start="5"><li>x</li></ol>', "a.md")
+    _xml(ch.body)
+    assert 'colspan="2"' in ch.body and 'rowspan="3"' in ch.body
+    assert '<ol start="5">' in ch.body
+
+
+def test_attribute_values_are_escaped():
+    ch = parse_chapter('<ol start="5&quot; onclick=&quot;x"><li>x</li></ol>', "a.md")
+    root = _xml(ch.body)
+    assert "onclick" not in root.find(".//ol").attrib
+
+
+def test_title_that_is_only_the_suffix_falls_back_to_filename():
+    ch = parse_chapter("# Site Name\n\nText.", "Chapter 3.md", strip_suffix="Site Name")
+    assert ch.title == "Chapter 3"
+
+
+def test_title_is_trimmed_after_suffix_removal():
+    ch = parse_chapter("# Hello | Site\n\nText.", "a.md", strip_suffix="| Site")
+    assert ch.title == "Hello"

@@ -247,3 +247,66 @@ def test_bad_order_is_error_naming_offender(files, order, offender):
     assert isinstance(err, ConvertError)
     assert err.code == "bad_order"
     assert err.filename == offender or offender in err.message
+
+
+# REVIEW FIXES
+
+@pytest.mark.parametrize("data", [b"", b"   \n", b"<!-- only a comment -->", b"<script>x()</script>"])
+def test_empty_chapter_is_error_naming_the_file(data):
+    err = convert([("ok.md", md("Ok")), ("empty.md", data)], opts())
+    assert isinstance(err, ConvertError)
+    assert err.code == "empty_file"
+    assert err.filename == "empty.md"
+
+
+def test_duplicate_filenames_are_error_naming_the_file():
+    err = convert([("ch1.md", md("First")), ("ch1.md", md("Second"))], opts())
+    assert isinstance(err, ConvertError)
+    assert err.code == "duplicate_filename"
+    assert err.filename == "ch1.md"
+
+
+@pytest.mark.parametrize("media_type", ["text/plain", "application/octet-stream", "image/svg+xml", ""])
+def test_non_image_cover_is_error(media_type):
+    err = convert([("a.md", md("A"))], opts(cover=ImageData(b"data", media_type)))
+    assert isinstance(err, ConvertError) and err.code == "bad_cover"
+
+
+def test_empty_cover_is_error():
+    err = convert([("a.md", md("A"))], opts(cover=ImageData(b"", "image/png")))
+    assert isinstance(err, ConvertError) and err.code == "bad_cover"
+
+
+def test_cover_counts_toward_total_size_limit():
+    files = [("a.md", md("A"))]
+    cover = ImageData(b"\x89PNG" + b"\x00" * 2000, "image/png")
+    err = convert(files, opts(cover=cover, max_total_bytes=1000))
+    assert isinstance(err, ConvertError) and err.code == "too_large"
+
+
+def test_data_uri_and_relative_images_produce_warnings():
+    body = "![d](data:image/png;base64,AAAA)\n\n![r](./pic.png)"
+    result = convert([("a.md", md("Alpha", body))], opts())
+    book = read(result)
+    assert len(result.warnings) == 2
+    assert {w.url for w in result.warnings} == {"data:image/png;base64,AAAA", "./pic.png"}
+    assert images(book) == []
+
+
+def test_long_data_uri_warning_url_is_truncated():
+    uri = "data:image/png;base64," + "A" * 5000
+    result = convert([("a.md", md("Alpha", f"![d]({uri})"))], opts())
+    assert len(result.warnings) == 1
+    assert len(result.warnings[0].url) < 200
+
+
+def test_image_total_budget_drops_images_past_the_limit_with_warning(base_url):
+    body = f"![one]({base_url}/a.png)\n\n![two]({base_url}/b.png)"
+    result = convert(
+        [("a.md", md("Alpha", body))],
+        opts(allow_loopback_for_tests=True, max_image_total_bytes=len(PNG) + 10),
+    )
+    book = read(result)
+    assert images(book) == [PNG]
+    assert [w.url for w in result.warnings] == [f"{base_url}/b.png"]
+    assert "budget" in result.warnings[0].reason
