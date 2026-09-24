@@ -5,6 +5,13 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024
+# Formats every EPUB reader handles. SVG is excluded on purpose: it can carry script.
+IMAGE_EXTENSIONS = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+}
 
 
 @dataclass(frozen=True)
@@ -56,8 +63,8 @@ def check_url(url: str, allow_loopback: bool = False) -> Verdict:
 def check_response(
     content_type: str | None, size: int, max_bytes: int = DEFAULT_MAX_BYTES
 ) -> Verdict:
-    if not media_type(content_type).startswith("image/"):
-        return _deny(f"not an image content type: {content_type!r}")
+    if media_type(content_type) not in IMAGE_EXTENSIONS:
+        return _deny(f"unsupported image content type: {content_type!r}")
     if size > max_bytes:
         return _deny(f"response too large: {size} > {max_bytes}")
     return _allow()

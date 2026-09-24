@@ -175,3 +175,31 @@ def test_no_files_left_on_disk(client, ok, tmp_path, monkeypatch):
     assert resp.status_code == (200 if ok else 400)
     assert _listing() == before
     assert os.listdir(tmp) == []
+
+
+# REVIEW FIXES
+
+def test_file_part_without_filename_returns_400(client):
+    data = {"title": "T", "author": "A", "files": [(io.BytesIO(b"# hi"), "")]}
+    resp = client.post("/convert", data=data, content_type="multipart/form-data")
+    assert resp.status_code == 400
+    assert resp.get_json()["error"]
+
+
+def test_empty_markdown_file_returns_400(client):
+    resp = _post(client, [("a.md", b"")])
+    assert resp.status_code == 400
+    assert resp.get_json()["error"]
+
+
+def test_duplicate_filenames_return_400(client):
+    resp = _post(client, [("a.md", b"# one"), ("a.md", b"# two")])
+    assert resp.status_code == 400
+
+
+def test_non_image_cover_returns_400(client):
+    data = _form([("a.md", b"# hi")], title="T", author="A")
+    data["cover"] = (io.BytesIO(b"not an image"), "cover.txt", "text/plain")
+    resp = client.post("/convert", data=data, content_type="multipart/form-data")
+    assert resp.status_code == 400
+    assert resp.get_json()["error"]

@@ -32,7 +32,10 @@ def create_app(config: dict | None = None) -> Flask:
     @app.post("/convert")
     def convert_route():
         form = request.form
-        files = [(f.filename, f.read()) for f in request.files.getlist("files")]
+        uploads = request.files.getlist("files")
+        if any(not f.filename for f in uploads):
+            return _error("Every uploaded file needs a name")
+        files = [(f.filename, f.read()) for f in uploads]
 
         order = None
         if form.get("order"):

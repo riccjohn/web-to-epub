@@ -65,6 +65,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 pass
         elif p == "/big":
             self._big()
+        elif p == "/drip":
+            self._drip()
         else:
             self._send(404, "text/plain", b"nope")
 
@@ -76,6 +78,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+
+    def _drip(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", "1000")
+        self.end_headers()
+        try:
+            for _ in range(1000):
+                self.wfile.write(b"x")
+                self.wfile.flush()
+                if self.server.stop.wait(0.1):
+                    break
+        except OSError:
+            pass
+        self.close_connection = True
 
     def _big(self):
         self.send_response(200)
@@ -267,3 +284,14 @@ def test_tls_verification_on_by_default(tls_server):
 def test_tls_succeeds_when_certificate_trusted(tls_server):
     result = _fetch(tls_server.base + "/img.png", ca_file=tls_server.cert)
     assert result.image == ImageData(data=PNG, media_type="image/png")
+
+
+# REVIEW FIXES
+
+def test_slow_drip_response_is_cut_off_by_total_deadline(server):
+    started = time.monotonic()
+    result = _fetch(server.base + "/drip", timeout=2.0, deadline_seconds=0.5)
+    elapsed = time.monotonic() - started
+    _assert_warning(result, server.base + "/drip")
+    assert elapsed < 2.0
+    assert "time" in result.warning.reason.lower()

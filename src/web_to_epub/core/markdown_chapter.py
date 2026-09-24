@@ -8,12 +8,17 @@ import nh3
 
 from web_to_epub.core.models import Chapter, ImageRef
 
-_VOID = {"br", "hr"}
+_VOID = {"area", "base", "br", "col", "embed", "hr", "input", "link", "meta", "source", "track", "wbr"}
 _INVALID_XML = re.compile("[^\t\n\r\x20-퟿-�\U00010000-\U0010ffff]")
 _H1 = re.compile(r"<h1>(.*?)</h1>", re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
 _TAGS = nh3.ALLOWED_TAGS - {"a"}
-_ATTRS = {"img": {"src", "alt", "title"}}
+_ATTRS = {
+    "img": {"src", "alt", "title"},
+    "td": {"colspan", "rowspan"},
+    "th": {"colspan", "rowspan"},
+    "ol": {"start"},
+}
 _SCHEMES = {"http", "https", "data"}
 
 
@@ -26,10 +31,9 @@ class _XhtmlWriter(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag == "img":
             self._image(dict(attrs))
-        elif tag in _VOID:
-            self.out.append(f"<{tag}/>")
         else:
-            self.out.append(f"<{tag}>")
+            attributes = "".join(f' {name}="{escape(value or "")}"' for name, value in attrs)
+            self.out.append(f"<{tag}{attributes}/>" if tag in _VOID else f"<{tag}{attributes}>")
 
     def handle_endtag(self, tag):
         if tag not in _VOID and tag != "img":
@@ -57,9 +61,9 @@ def parse_chapter(text: str, filename: str, strip_suffix: str | None = None) -> 
         inner = m.group(1)
         suffix = escape(strip_suffix, quote=False) if strip_suffix else ""
         if suffix and inner.endswith(suffix):
-            inner = inner[: -len(suffix)]
+            inner = inner[: -len(suffix)].rstrip()
         html = html[: m.start(1)] + inner + html[m.end(1) :]
-        title = unescape(_TAG.sub("", inner))
+        title = unescape(_TAG.sub("", inner)).strip() or title
     clean = nh3.clean(html, tags=_TAGS, attributes=_ATTRS, url_schemes=_SCHEMES)
     writer = _XhtmlWriter()
     writer.feed(clean)

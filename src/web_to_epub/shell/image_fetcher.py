@@ -8,6 +8,7 @@ The Host header and TLS SNI/verification use the original hostname.
 import http.client
 import socket
 import ssl
+import time
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
@@ -80,10 +81,17 @@ def _connect(parsed, allow_loopback, timeout, tls_context):
     raise last_error
 
 
-def _read_limited(response, max_bytes: int) -> bytes:
+def _check_deadline(deadline: float) -> None:
+    if time.monotonic() > deadline:
+        raise _Refused("timed out (total time limit exceeded)")
+
+
+def _read_limited(response, max_bytes: int, deadline: float) -> bytes:
     chunks = []
     total = 0
-    while chunk := response.read(_CHUNK):
+    # read1 returns after one socket read, so the deadline is checked even on a slow drip
+    while chunk := response.read1(_CHUNK):
+        _check_deadline(deadline)
         total += len(chunk)
         if total > max_bytes:
             raise _Refused(f"response too large: > {max_bytes}")
@@ -91,10 +99,11 @@ def _read_limited(response, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
-def _fetch(url, allow_loopback, max_bytes, timeout, max_redirects, ca_file) -> ImageData:
+def _fetch(url, allow_loopback, max_bytes, timeout, max_redirects, ca_file, deadline) -> ImageData:
     current = url
     tls_context = None
     for _ in range(max_redirects + 1):
+        _check_deadline(deadline)
         verdict = check_url(current, allow_loopback)
         if not verdict.allowed:
             raise _Refused(verdict.reason)
@@ -123,7 +132,7 @@ def _fetch(url, allow_loopback, max_bytes, timeout, max_redirects, ca_file) -> I
             verdict = check_response(content_type, size, max_bytes)
             if not verdict.allowed:
                 raise _Refused(verdict.reason)
-            data = _read_limited(response, max_bytes)
+            data = _read_limited(response, max_bytes, deadline)
             return ImageData(data=data, media_type=media_type(content_type))
         finally:
             conn.close()
@@ -138,10 +147,13 @@ def fetch_image(
     timeout: float = 10.0,
     max_redirects: int = 5,
     ca_file: str | None = None,
+    deadline_seconds: float = 30.0,
 ) -> FetchResult:
+    """`timeout` bounds each socket operation; `deadline_seconds` bounds the whole fetch."""
+    deadline = time.monotonic() + deadline_seconds
     try:
         image = _fetch(
-            url, allow_loopback_for_tests, max_bytes, timeout, max_redirects, ca_file
+            url, allow_loopback_for_tests, max_bytes, timeout, max_redirects, ca_file, deadline
         )
     except Exception as exc:  # never raise to the caller
         return FetchResult(warning=FetchWarning(url=url, reason=str(exc) or type(exc).__name__))

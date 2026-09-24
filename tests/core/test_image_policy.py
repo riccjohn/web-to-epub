@@ -254,3 +254,15 @@ def test_property_private_ipv4_literal_urls_are_rejected(ip):
 @given(st.integers(min_value=0, max_value=100 * 1024 * 1024), st.integers(min_value=1, max_value=50 * 1024 * 1024))
 def test_property_size_accepted_iff_within_cap(size, cap):
     assert check_response("image/png", size, max_bytes=cap).allowed == (size <= cap)
+
+
+# REVIEW FIXES
+
+@pytest.mark.parametrize("content_type", ["image/svg+xml", "image/x-icon", "image/avif", "image/tiff"])
+def test_only_packageable_image_types_are_accepted(content_type):
+    assert not check_response(content_type, 1024).allowed
+
+
+@pytest.mark.parametrize("content_type", ["image/png", "image/jpeg", "image/gif", "image/webp", "IMAGE/PNG; charset=x"])
+def test_packageable_image_types_are_accepted(content_type):
+    assert check_response(content_type, 1024).allowed
