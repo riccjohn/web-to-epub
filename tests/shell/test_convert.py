@@ -28,6 +28,7 @@ Accepted extensions (case-insensitive): .md, .markdown, .txt.
 Output is verified by reading the EPUB back with ebooklib.
 """
 
+import base64
 import http.server
 import io
 import threading
@@ -284,20 +285,43 @@ def test_cover_counts_toward_total_size_limit():
     assert isinstance(err, ConvertError) and err.code == "too_large"
 
 
-def test_data_uri_and_relative_images_produce_warnings():
-    body = "![d](data:image/png;base64,AAAA)\n\n![r](./pic.png)"
-    result = convert([("a.md", md("Alpha", body))], opts())
-    book = read(result)
-    assert len(result.warnings) == 2
-    assert {w.url for w in result.warnings} == {"data:image/png;base64,AAAA", "./pic.png"}
-    assert images(book) == []
+def _data_uri(data: bytes, media_type: str = "image/png") -> str:
+    return f"data:{media_type};base64,{base64.b64encode(data).decode()}"
 
 
-def test_long_data_uri_warning_url_is_truncated():
-    uri = "data:image/png;base64," + "A" * 5000
+def test_data_uri_images_are_embedded_without_warnings():
+    result = convert([("a.md", md("Alpha", f"![d]({_data_uri(PNG)})"))], opts())
+    assert result.warnings == []
+    assert images(read(result)) == [PNG]
+
+
+def test_same_data_uri_used_twice_is_embedded_once():
+    body = f"![d]({_data_uri(PNG)})\n\n![e]({_data_uri(PNG)})"
+    assert images(read(convert([("a.md", md("Alpha", body))], opts()))) == [PNG]
+
+
+def test_relative_image_paths_produce_a_warning():
+    result = convert([("a.md", md("Alpha", "![r](./pic.png)"))], opts())
+    assert [w.url for w in result.warnings] == ["./pic.png"]
+    assert images(read(result)) == []
+
+
+def test_undecodable_data_uri_warns_with_truncated_url():
+    uri = "data:text/plain;base64," + "A" * 5000
     result = convert([("a.md", md("Alpha", f"![d]({uri})"))], opts())
     assert len(result.warnings) == 1
     assert len(result.warnings[0].url) < 200
+    assert images(read(result)) == []
+
+
+def test_data_uri_images_count_toward_the_image_budget(base_url):
+    body = f"![d]({_data_uri(PNG)})\n\n![two]({base_url}/b.png)"
+    result = convert(
+        [("a.md", md("Alpha", body))],
+        opts(allow_loopback_for_tests=True, max_image_total_bytes=len(PNG) + 10),
+    )
+    assert images(read(result)) == [PNG]
+    assert [w.url for w in result.warnings] == [f"{base_url}/b.png"]
 
 
 def test_image_total_budget_drops_images_past_the_limit_with_warning(base_url):

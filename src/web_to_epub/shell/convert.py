@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import PurePath
 
+from web_to_epub.core.data_uri import decode_data_uri
 from web_to_epub.core.epub_builder import BookMetadata, ImageData, build_epub
 from web_to_epub.core.image_policy import IMAGE_EXTENSIONS
 from web_to_epub.core.markdown_chapter import parse_chapter
@@ -15,6 +16,7 @@ from web_to_epub.shell.image_fetcher import FetchWarning, fetch_image
 _EXTENSIONS = {".md", ".markdown", ".txt"}
 _FETCH_WORKERS = 5
 _WARNING_URL_MAX = 80
+_REMOTE_PREFIXES = ("http://", "https://")
 
 
 @dataclass(frozen=True)
@@ -92,17 +94,46 @@ def convert(files: list[tuple[str, bytes]], options: Options) -> Result | Conver
         chapters.append(chapter)
 
     refs = [ref for chapter in chapters for ref in chapter.images if ref.src]
-    urls = list(dict.fromkeys(ref.src for ref in refs if ref.is_remote))
-    images, warnings = _fetch_images(urls, options)
-    for src in dict.fromkeys(ref.src for ref in refs if not ref.is_remote):
-        shown = src if len(src) <= _WARNING_URL_MAX else src[:_WARNING_URL_MAX] + "…"
-        warnings.append(FetchWarning(shown, "only http(s) image URLs are fetched"))
+    srcs = list(dict.fromkeys(ref.src for ref in refs))
+    urls = [src for src in srcs if src.startswith(_REMOTE_PREFIXES)]
+    local = [src for src in srcs if not src.startswith(_REMOTE_PREFIXES)]
+    images, warnings, used = _decode_local_images(local, options)
+    fetched, fetch_warnings = _fetch_images(urls, options, used)
+    images.update(fetched)
+    warnings = fetch_warnings + warnings
 
     metadata = BookMetadata(options.title, options.author, options.language, options.description)
     return Result(build_epub(chapters, metadata, images, options.cover), warnings)
 
 
-def _fetch_images(urls: list[str], options: Options) -> tuple[dict[str, ImageData], list[FetchWarning]]:
+def _decode_local_images(
+    srcs: list[str], options: Options
+) -> tuple[dict[str, ImageData], list[FetchWarning], int]:
+    """Embed data: URIs; anything else local (relative paths) cannot be resolved, so it warns."""
+    images: dict[str, ImageData] = {}
+    warnings: list[FetchWarning] = []
+    used = 0
+    for src in srcs:
+        shown = src if len(src) <= _WARNING_URL_MAX else src[:_WARNING_URL_MAX] + "…"
+        if not src.lower().startswith("data:"):
+            warnings.append(FetchWarning(shown, "only http(s) and data: image sources are supported"))
+            continue
+        try:
+            image = decode_data_uri(src)
+        except ValueError as exc:
+            warnings.append(FetchWarning(shown, str(exc)))
+            continue
+        if used + len(image.data) > options.max_image_total_bytes:
+            warnings.append(FetchWarning(shown, "skipped: image size budget exceeded"))
+            continue
+        used += len(image.data)
+        images[src] = image
+    return images, warnings, used
+
+
+def _fetch_images(
+    urls: list[str], options: Options, used_bytes: int = 0
+) -> tuple[dict[str, ImageData], list[FetchWarning]]:
     """Fetch in small batches so the byte and time budgets stop the work, not just the results."""
     images: dict[str, ImageData] = {}
     warnings: list[FetchWarning] = []
@@ -112,7 +143,7 @@ def _fetch_images(urls: list[str], options: Options) -> tuple[dict[str, ImageDat
             warnings.append(warning)
 
     started = time.monotonic()
-    total = 0
+    total = used_bytes
     with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
         for start in range(0, len(urls), _FETCH_WORKERS):
             batch = urls[start : start + _FETCH_WORKERS]
