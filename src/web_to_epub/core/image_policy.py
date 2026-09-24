@@ -14,6 +14,19 @@ IMAGE_EXTENSIONS = {
 }
 
 
+def matches_signature(data: bytes, kind: str) -> bool:
+    """True if `data` starts with the magic bytes of the image type `kind`."""
+    if kind == "image/png":
+        return data.startswith(b"\x89PNG\r\n\x1a\n")
+    if kind == "image/jpeg":
+        return data.startswith(b"\xff\xd8\xff")
+    if kind == "image/gif":
+        return data.startswith((b"GIF87a", b"GIF89a"))
+    if kind == "image/webp":
+        return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    return False
+
+
 @dataclass(frozen=True)
 class Verdict:
     allowed: bool

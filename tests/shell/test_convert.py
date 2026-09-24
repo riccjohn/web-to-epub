@@ -334,3 +334,35 @@ def test_image_total_budget_drops_images_past_the_limit_with_warning(base_url):
     assert images(book) == [PNG]
     assert [w.url for w in result.warnings] == [f"{base_url}/b.png"]
     assert "budget" in result.warnings[0].reason
+
+
+def test_images_share_the_budget_in_document_order(base_url):
+    body = f"![one]({base_url}/a.png)\n\n![d]({_data_uri(PNG2)})"
+    result = convert(
+        [("a.md", md("Alpha", body))],
+        opts(allow_loopback_for_tests=True, max_image_total_bytes=len(PNG) + 10),
+    )
+    assert images(read(result)) == [PNG]
+    assert "budget" in result.warnings[0].reason
+    assert result.warnings[0].url.startswith("data:")
+
+
+def test_uppercase_scheme_is_treated_as_remote_not_unsupported():
+    result = convert([("a.md", md("Alpha", "![x](HTTPS://127.0.0.1:1/a.png)"))], opts())
+    assert len(result.warnings) == 1
+    assert "only http(s)" not in result.warnings[0].reason
+
+
+def test_data_uri_over_budget_is_rejected_without_embedding():
+    result = convert(
+        [("a.md", md("Alpha", f"![d]({_data_uri(PNG)})"))],
+        opts(max_image_total_bytes=len(PNG) - 1),
+    )
+    assert images(read(result)) == []
+    assert len(result.warnings) == 1
+
+
+def test_long_remote_url_warning_is_truncated():
+    url = "http://127.0.0.1:1/" + "a" * 300 + ".png"
+    result = convert([("a.md", md("Alpha", f"![x]({url})"))], opts())
+    assert len(result.warnings) == 1 and len(result.warnings[0].url) < 200
