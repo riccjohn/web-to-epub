@@ -46,7 +46,7 @@ class _XhtmlWriter(HTMLParser):
         src = attrs.get("src") or ""
         alt = attrs.get("alt") or ""
         caption = attrs.get("title") or None
-        self.images.append(ImageRef(src, alt, caption, src.startswith(("http://", "https://"))))
+        self.images.append(ImageRef(src, alt, caption, src.lower().startswith(("http://", "https://"))))
         img = f'<img src="{escape(src)}" alt="{escape(alt)}"/>'
         if caption:
             img = f"<figure>{img}<figcaption>{escape(caption, quote=False)}</figcaption></figure>"

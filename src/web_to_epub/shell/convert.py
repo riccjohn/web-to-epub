@@ -5,8 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import PurePath
 
+from web_to_epub.core.data_uri import ImageTooLarge, decode_data_uri
 from web_to_epub.core.epub_builder import BookMetadata, ImageData, build_epub
-from web_to_epub.core.image_policy import IMAGE_EXTENSIONS
+from web_to_epub.core.image_policy import DEFAULT_MAX_BYTES, IMAGE_EXTENSIONS
 from web_to_epub.core.markdown_chapter import parse_chapter
 from web_to_epub.core.ordering import natural_sort
 from web_to_epub.shell.image_fetcher import FetchWarning, fetch_image
@@ -91,52 +92,109 @@ def convert(files: list[tuple[str, bytes]], options: Options) -> Result | Conver
             return ConvertError("empty_file", f"File has no content: {name}", name)
         chapters.append(chapter)
 
-    refs = [ref for chapter in chapters for ref in chapter.images if ref.src]
-    urls = list(dict.fromkeys(ref.src for ref in refs if ref.is_remote))
-    images, warnings = _fetch_images(urls, options)
-    for src in dict.fromkeys(ref.src for ref in refs if not ref.is_remote):
-        shown = src if len(src) <= _WARNING_URL_MAX else src[:_WARNING_URL_MAX] + "…"
-        warnings.append(FetchWarning(shown, "only http(s) image URLs are fetched"))
+    sources: dict[str, bool] = {}  # src -> is_remote, in document order
+    for chapter in chapters:
+        for ref in chapter.images:
+            if ref.src:
+                sources.setdefault(ref.src, ref.is_remote)
+    images, warnings = _collect_images(list(sources.items()), options)
 
     metadata = BookMetadata(options.title, options.author, options.language, options.description)
     return Result(build_epub(chapters, metadata, images, options.cover), warnings)
 
 
-def _fetch_images(urls: list[str], options: Options) -> tuple[dict[str, ImageData], list[FetchWarning]]:
-    """Fetch in small batches so the byte and time budgets stop the work, not just the results."""
+class _Budget:
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.used = 0
+
+    @property
+    def remaining(self) -> int:
+        return self.limit - self.used
+
+
+def _shown(url: str) -> str:
+    return url if len(url) <= _WARNING_URL_MAX else url[:_WARNING_URL_MAX] + "…"
+
+
+def _collect_images(
+    sources: list[tuple[str, bool]], options: Options
+) -> tuple[dict[str, ImageData], list[FetchWarning]]:
+    """Resolve images in document order against one shared byte budget.
+
+    Consecutive remote URLs are fetched in small parallel batches so the byte and time budgets
+    stop the work, not just the results. data: URIs are decoded inline; other local sources
+    (relative paths) cannot be resolved, so they only warn.
+    """
     images: dict[str, ImageData] = {}
     warnings: list[FetchWarning] = []
+    budget = _Budget(options.max_image_total_bytes)
+    started = time.monotonic()
+    pending: list[str] = []
 
-    def warn(warning: FetchWarning) -> None:
-        if warning not in warnings:
+    seen_warnings: set[FetchWarning] = set()
+
+    def warn(url: str, reason: str) -> None:
+        warning = FetchWarning(_shown(url), reason)
+        if warning not in seen_warnings:
+            seen_warnings.add(warning)
             warnings.append(warning)
 
-    started = time.monotonic()
-    total = 0
+    def flush(pool: ThreadPoolExecutor) -> None:
+        batch = pending[:]
+        pending.clear()
+        if not batch:
+            return
+        remaining = options.fetch_budget_seconds - (time.monotonic() - started)
+        if remaining <= 0 or budget.remaining <= 0:
+            for url in batch:
+                warn(url, "skipped: image fetch budget exhausted")
+            return
+
+        def fetch(url: str):
+            return fetch_image(
+                url,
+                allow_loopback_for_tests=options.allow_loopback_for_tests,
+                deadline_seconds=remaining,
+            )
+
+        # pool.map keeps input order, so warnings and images stay deterministic
+        for url, fetched in zip(batch, pool.map(fetch, batch)):
+            if fetched.image is None:
+                warn(fetched.warning.url, fetched.warning.reason)
+            elif len(fetched.image.data) > budget.remaining:
+                warn(url, "skipped: image size budget exceeded")
+            else:
+                budget.used += len(fetched.image.data)
+                images[url] = fetched.image
+
+    def embed(src: str) -> None:
+        if not src.lower().startswith("data:"):
+            warn(src, "only http(s) and data: image sources are supported")
+        elif budget.remaining <= 0:
+            warn(src, "skipped: image size budget exceeded")
+        else:
+            cap = min(DEFAULT_MAX_BYTES, budget.remaining)
+            try:
+                image = decode_data_uri(src, cap)
+            except ImageTooLarge as exc:
+                over_budget = cap < DEFAULT_MAX_BYTES
+                warn(src, "skipped: image size budget exceeded" if over_budget else str(exc))
+                return
+            except ValueError as exc:
+                warn(src, str(exc))
+                return
+            budget.used += len(image.data)
+            images[src] = image
+
     with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as pool:
-        for start in range(0, len(urls), _FETCH_WORKERS):
-            batch = urls[start : start + _FETCH_WORKERS]
-            remaining = options.fetch_budget_seconds - (time.monotonic() - started)
-            if remaining <= 0 or total >= options.max_image_total_bytes:
-                reason = "skipped: image fetch budget exhausted"
-                for url in batch:
-                    warn(FetchWarning(url, reason))
-                continue
-
-            def fetch(url: str, deadline: float = remaining):
-                return fetch_image(
-                    url,
-                    allow_loopback_for_tests=options.allow_loopback_for_tests,
-                    deadline_seconds=deadline,
-                )
-
-            # pool.map keeps input order, so warnings and images stay deterministic
-            for url, fetched in zip(batch, pool.map(fetch, batch)):
-                if fetched.image is None:
-                    warn(fetched.warning)
-                elif total + len(fetched.image.data) > options.max_image_total_bytes:
-                    warn(FetchWarning(url, "skipped: image size budget exceeded"))
-                else:
-                    total += len(fetched.image.data)
-                    images[url] = fetched.image
+        for src, is_remote in sources:
+            if is_remote:
+                pending.append(src)
+                if len(pending) == _FETCH_WORKERS:
+                    flush(pool)
+            else:
+                flush(pool)
+                embed(src)
+        flush(pool)
     return images, warnings
