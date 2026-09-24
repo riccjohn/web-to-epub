@@ -12,6 +12,10 @@ _DATA_URI = re.compile(r"data:([^,]*),(.*)", re.DOTALL | re.IGNORECASE)
 _WHITESPACE = re.compile(r"\s+")
 
 
+class ImageTooLarge(ValueError):
+    """The decoded image would exceed the byte cap."""
+
+
 def _normalise_base64(payload: str) -> str:
     """Accept percent-encoding, line wraps, URL-safe alphabet and missing padding."""
     text = _WHITESPACE.sub("", unquote(payload)).translate(str.maketrans("-_", "+/")).rstrip("=")
@@ -30,16 +34,17 @@ def decode_data_uri(uri: str, max_bytes: int = DEFAULT_MAX_BYTES) -> ImageData:
     kind = media_type(parts[0])
     if kind not in IMAGE_EXTENSIONS:
         raise ValueError(f"unsupported image content type: {kind!r}")
-    if len(payload) * 3 // 4 > max_bytes + 3:  # cheap bound before decoding
-        raise ValueError(f"image too large: > {max_bytes} bytes")
+    normalised = _normalise_base64(payload)
+    if len(normalised) * 3 // 4 > max_bytes + 3:  # cheap bound before decoding
+        raise ImageTooLarge(f"image too large: > {max_bytes} bytes")
     try:
-        data = base64.b64decode(_normalise_base64(payload), validate=True)
+        data = base64.b64decode(normalised, validate=True)
     except (binascii.Error, ValueError):
         raise ValueError("invalid base64 data") from None
     if not data:
         raise ValueError("data: URI has no content")
     if len(data) > max_bytes:
-        raise ValueError(f"image too large: {len(data)} > {max_bytes} bytes")
+        raise ImageTooLarge(f"image too large: {len(data)} > {max_bytes} bytes")
     if not matches_signature(data, kind):
         raise ValueError(f"data does not look like {kind}")
     return ImageData(data, kind)

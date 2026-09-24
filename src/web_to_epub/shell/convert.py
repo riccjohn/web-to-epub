@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import PurePath
 
-from web_to_epub.core.data_uri import decode_data_uri
+from web_to_epub.core.data_uri import ImageTooLarge, decode_data_uri
 from web_to_epub.core.epub_builder import BookMetadata, ImageData, build_epub
 from web_to_epub.core.image_policy import DEFAULT_MAX_BYTES, IMAGE_EXTENSIONS
 from web_to_epub.core.markdown_chapter import parse_chapter
@@ -132,9 +132,12 @@ def _collect_images(
     started = time.monotonic()
     pending: list[str] = []
 
+    seen_warnings: set[FetchWarning] = set()
+
     def warn(url: str, reason: str) -> None:
         warning = FetchWarning(_shown(url), reason)
-        if warning not in warnings:
+        if warning not in seen_warnings:
+            seen_warnings.add(warning)
             warnings.append(warning)
 
     def flush(pool: ThreadPoolExecutor) -> None:
@@ -174,9 +177,12 @@ def _collect_images(
             cap = min(DEFAULT_MAX_BYTES, budget.remaining)
             try:
                 image = decode_data_uri(src, cap)
-            except ValueError as exc:
-                over_budget = cap < DEFAULT_MAX_BYTES and "too large" in str(exc)
+            except ImageTooLarge as exc:
+                over_budget = cap < DEFAULT_MAX_BYTES
                 warn(src, "skipped: image size budget exceeded" if over_budget else str(exc))
+                return
+            except ValueError as exc:
+                warn(src, str(exc))
                 return
             budget.used += len(image.data)
             images[src] = image

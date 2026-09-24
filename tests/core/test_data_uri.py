@@ -87,3 +87,10 @@ def test_percent_encoded_padding_and_plus_are_accepted():
     data = MAGIC["image/png"] + b"\xfb\xff"
     payload = base64.b64encode(data).decode().replace("+", "%2B").replace("=", "%3D")
     assert decode_data_uri(f"data:image/png;base64,{payload}").data == data
+
+
+def test_line_wrapped_payload_within_cap_is_accepted():
+    data = MAGIC["image/png"] + b"x" * 992
+    encoded = base64.b64encode(data).decode()
+    wrapped = "\n".join(encoded[i : i + 4] for i in range(0, len(encoded), 4))
+    assert decode_data_uri(f"data:image/png;base64,{wrapped}", max_bytes=1000).data == data
