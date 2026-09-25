@@ -6,7 +6,9 @@ import re
 from flask import Flask, Response, jsonify, request
 
 from web_to_epub.core.epub_builder import ImageData
+from web_to_epub.core.url_list import clean_url_list
 from web_to_epub.shell.convert import ConvertError, Options, convert
+from web_to_epub.shell.fetch_pages import PageChapter, fetch_pages
 
 _DEFAULT_MAX_CONTENT_LENGTH = 60 * 1024 * 1024
 
@@ -59,6 +61,7 @@ def create_app(config: dict | None = None) -> Flask:
             strip_suffix=form.get("strip_suffix") or None,
             order=order,
             cover=cover,
+            allow_loopback_for_tests=app.config.get("ALLOW_LOOPBACK_FOR_TESTS", False),
         )
         result = convert(files, options)
         if isinstance(result, ConvertError):
@@ -72,5 +75,36 @@ def create_app(config: dict | None = None) -> Flask:
                 "X-Warnings": str(len(result.warnings)),
             },
         )
+
+    @app.post("/fetch")
+    def fetch_route():
+        body = request.get_json(silent=True)
+        urls = body.get("urls") if isinstance(body, dict) else None
+        if not isinstance(urls, list) or not urls or not all(isinstance(u, str) for u in urls):
+            return _error("urls must be a non-empty list of strings")
+        try:
+            cleaned = clean_url_list(urls)
+        except ValueError as exc:
+            return _error(str(exc))
+        if not cleaned.urls and not cleaned.errors:
+            return _error("urls must be a non-empty list of strings")
+        if cleaned.errors:
+            return _error("; ".join(f"{e.entry}: {e.reason}" for e in cleaned.errors))
+
+        results = fetch_pages(
+            cleaned.urls,
+            allow_loopback_for_tests=app.config.get("ALLOW_LOOPBACK_FOR_TESTS", False),
+        )
+        chapters = [
+            {"filename": r.filename, "url": r.url, "title": r.title, "markdown": r.markdown}
+            for r in results
+            if isinstance(r, PageChapter)
+        ]
+        errors = [
+            {"url": r.url, "message": r.message}
+            for r in results
+            if not isinstance(r, PageChapter)
+        ]
+        return jsonify(chapters=chapters, errors=errors)
 
     return app

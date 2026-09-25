@@ -17,6 +17,7 @@ from hypothesis import given, strategies as st
 from web_to_epub.core.image_policy import (
     DEFAULT_MAX_BYTES,
     check_address,
+    check_page_response,
     check_response,
     check_url,
 )
@@ -266,3 +267,59 @@ def test_only_packageable_image_types_are_accepted(content_type):
 @pytest.mark.parametrize("content_type", ["image/png", "image/jpeg", "image/gif", "image/webp", "IMAGE/PNG; charset=x"])
 def test_packageable_image_types_are_accepted(content_type):
     assert check_response(content_type, 1024).allowed
+
+
+# --- check_page_response ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        "text/html",
+        "text/html; charset=utf-8",
+        "TEXT/HTML;charset=UTF-8",
+        "application/xhtml+xml",
+        "application/xhtml+xml; charset=utf-8",
+    ],
+)
+def test_page_html_content_types_allowed(content_type):
+    assert check_page_response(content_type, 100, 1000).allowed
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        "image/png",
+        "application/pdf",
+        "text/plain",
+        "application/json",
+        "application/octet-stream",
+        "text/htmlx",
+        "",
+        None,
+    ],
+)
+def test_page_non_html_content_types_denied_with_reason(content_type):
+    verdict = check_page_response(content_type, 100, 1000)
+    assert not verdict.allowed
+    assert verdict.reason
+
+
+def test_page_oversize_denied_and_boundary_allowed():
+    assert check_page_response("text/html", 1000, 1000).allowed
+    over = check_page_response("text/html", 1001, 1000)
+    assert not over.allowed
+    assert over.reason
+
+
+@given(
+    size=st.integers(min_value=0, max_value=10_000),
+    cap=st.integers(min_value=0, max_value=10_000),
+)
+def test_page_size_verdict_matches_cap_property(size, cap):
+    assert check_page_response("text/html", size, cap).allowed == (size <= cap)
+
+
+def test_page_default_max_bytes_applies():
+    assert check_page_response("text/html", DEFAULT_MAX_BYTES).allowed
+    assert not check_page_response("text/html", DEFAULT_MAX_BYTES + 1).allowed

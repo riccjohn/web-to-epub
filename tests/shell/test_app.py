@@ -203,3 +203,199 @@ def test_non_image_cover_returns_400(client):
     resp = client.post("/convert", data=data, content_type="multipart/form-data")
     assert resp.status_code == 400
     assert resp.get_json()["error"]
+
+
+# POST /fetch  (URL sources) -- real local fixture server, Flask test client
+#
+#   POST /fetch  JSON {"urls": [...]}
+#     200: {"chapters": [{filename, url, title, markdown}], "errors": [{url, message}]}
+#          (both keys always present)
+#     400: {"error": msg} for non-JSON body, urls missing / not a list of strings,
+#          empty list, over the max count (50), or an invalid URL (ftp://, no host).
+#   App config ALLOW_LOOPBACK_FOR_TESTS (default False) lets /fetch AND /convert
+#   image fetching reach the 127.0.0.1 fixture server. It is a config key only,
+#   never a request field.
+
+import http.server
+import posixpath
+import re
+import threading
+
+from ebooklib import ITEM_IMAGE
+
+_FIXTURE_PNG = b"\x89PNG\r\n\x1a\n" + b"\x07" * 40
+
+
+def _fx_page(title, body):
+    return (
+        f"<html><head><title>{title}</title></head>"
+        f"<body><article><h1>{title}</h1>{body}</article></body></html>"
+    ).encode()
+
+
+class _FxHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        base = self.server.base
+        if self.path == "/a":
+            body = _fx_page(
+                "Alpha",
+                f'<p>see <a href="{base}/b">beta</a> and '
+                f'<a href="https://example.com/external">ext</a></p>'
+                f'<p><img src="{base}/pic.png" alt="pic"></p>',
+            )
+            self._send(200, "text/html; charset=utf-8", body)
+        elif self.path == "/b":
+            body = _fx_page("Beta", f'<p>back to <a href="{base}/a">alpha</a> beta body</p>')
+            self._send(200, "text/html; charset=utf-8", body)
+        elif self.path == "/pic.png":
+            self._send(200, "image/png", _FIXTURE_PNG)
+        else:
+            self._send(404, "text/html", b"<html>nope</html>")
+
+    def _send(self, code, ctype, body):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture
+def fx_server():
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _FxHandler)
+    srv.daemon_threads = True
+    srv.base = f"http://127.0.0.1:{srv.server_address[1]}"
+    t = threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
+    t.start()
+    try:
+        yield srv
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        t.join(timeout=5)
+
+
+@pytest.fixture
+def loopback_client():
+    return create_app({"TESTING": True, "ALLOW_LOOPBACK_FOR_TESTS": True}).test_client()
+
+
+def test_fetch_returns_chapters_in_input_order(loopback_client, fx_server):
+    urls = [f"{fx_server.base}/b", f"{fx_server.base}/a"]
+    resp = loopback_client.post("/fetch", json={"urls": urls})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert set(body) == {"chapters", "errors"}
+    assert body["errors"] == []
+    assert [c["url"] for c in body["chapters"]] == urls
+    assert [c["title"] for c in body["chapters"]] == ["Beta", "Alpha"]
+    for c in body["chapters"]:
+        assert set(c) == {"filename", "url", "title", "markdown"}
+        assert c["filename"].endswith(".md") and c["markdown"].strip()
+
+
+def test_fetch_partial_failure_reports_error_and_keeps_others(loopback_client, fx_server):
+    missing = f"{fx_server.base}/missing"
+    resp = loopback_client.post("/fetch", json={"urls": [f"{fx_server.base}/a", missing]})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert [c["title"] for c in body["chapters"]] == ["Alpha"]
+    assert len(body["errors"]) == 1
+    assert body["errors"][0]["url"] == missing
+    assert body["errors"][0]["message"].strip()
+
+
+def test_fetch_non_public_address_is_a_per_url_error_not_a_500(client, fx_server):
+    url = f"{fx_server.base}/a"  # loopback; default config forbids it
+    resp = client.post("/fetch", json={"urls": [url]})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["chapters"] == []
+    assert [e["url"] for e in body["errors"]] == [url]
+    assert body["errors"][0]["message"].strip()
+
+
+def test_fetch_loopback_is_not_enabled_by_a_request_field(client, fx_server):
+    url = f"{fx_server.base}/a"
+    resp = client.post("/fetch", json={"urls": [url], "allow_loopback_for_tests": True})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["chapters"] == [] and len(body["errors"]) == 1
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"data": "not json", "content_type": "application/json"},
+        {"data": "hello", "content_type": "text/plain"},
+        {"json": {}},
+        {"json": {"urls": "http://example.com/"}},
+        {"json": {"urls": [1, 2]}},
+        {"json": {"urls": ["http://example.com/", None]}},
+        {"json": {"urls": []}},
+        {"json": {"urls": [f"http://example.com/{i}" for i in range(51)]}},
+        {"json": {"urls": ["ftp://example.com/file"]}},
+        {"json": {"urls": ["http://"]}},
+        {"json": {"urls": ["http://example.com/ok", "not a url"]}},
+        {"json": ["http://example.com/"]},
+    ],
+    ids=["bad_json", "not_json_type", "urls_missing", "urls_string", "urls_ints",
+         "urls_mixed_types", "urls_empty", "over_max", "ftp_scheme", "no_host",
+         "one_invalid_among_valid", "body_is_list"],
+)
+def test_fetch_bad_requests_return_400_json_error(client, kwargs):
+    resp = client.post("/fetch", **kwargs)
+    assert resp.status_code == 400
+    body = resp.get_json()
+    assert isinstance(body["error"], str) and body["error"]
+
+
+def test_fetch_response_feeds_convert_end_to_end(loopback_client, fx_server, tmp_path):
+    a_url, b_url = f"{fx_server.base}/a", f"{fx_server.base}/b"
+    fetched = loopback_client.post("/fetch", json={"urls": [a_url, b_url]})
+    assert fetched.status_code == 200
+    chapters = fetched.get_json()["chapters"]
+    assert len(chapters) == 2
+
+    data = {
+        "title": "Web Book",
+        "author": "Ann Author",
+        "order": json.dumps([c["filename"] for c in chapters]),
+        "files": [(io.BytesIO(c["markdown"].encode("utf-8")), c["filename"]) for c in chapters],
+    }
+    resp = loopback_client.post("/convert", data=data, content_type="multipart/form-data")
+    assert resp.status_code == 200
+    assert resp.headers["X-Warnings"] == "0"
+    book = _read_epub(resp.data, tmp_path)
+
+    docs = [i for i in book.get_items_of_type(ITEM_DOCUMENT) if not isinstance(i, epub.EpubNav)]
+    assert len(docs) == 2
+    a_doc, b_doc = docs
+    a_html = a_doc.get_content().decode("utf-8")
+
+    hrefs = re.findall(r'<a\b[^>]*\shref="([^"]*)"', a_html)
+    internal = [
+        h for h in hrefs
+        if not h.startswith(("http://", "https://")) and
+        posixpath.normpath(posixpath.join(posixpath.dirname(a_doc.get_name()), h.split("#")[0]))
+        == b_doc.get_name()
+    ]
+    assert internal, f"chapter A has no link to chapter B's document; hrefs={hrefs}"
+    assert "https://example.com/external" in hrefs
+    assert not any(h.startswith(fx_server.base) for h in hrefs)
+
+    assert any(True for _ in book.get_items_of_type(ITEM_IMAGE)), "fixture image not embedded"
+
+
+@pytest.mark.parametrize("urls", [["", "   "], [""], ["\t", "\n", "  "]],
+                         ids=["two_blanks", "one_blank", "whitespace_kinds"])
+def test_fetch_only_blank_urls_returns_400_like_empty_list(client, urls):
+    resp = client.post("/fetch", json={"urls": urls})
+    assert resp.status_code == 400
+    body = resp.get_json()
+    assert isinstance(body["error"], str) and body["error"]

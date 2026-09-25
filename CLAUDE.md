@@ -9,7 +9,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
 
-Runtime deps: flask, ebooklib, markdown, nh3. Dev deps: pytest, hypothesis.
+Runtime deps: flask, ebooklib, markdown, nh3, beautifulsoup4, html5lib, markdownify. Dev deps: pytest, hypothesis.
 
 ## Tests
 
