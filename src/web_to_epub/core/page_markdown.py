@@ -29,6 +29,29 @@ def _safe_normalize(url):
         return None
 
 
+_STOPWORDS = {"the", "and", "for", "with", "from", "this", "that", "your", "are"}
+
+
+def _words(text):
+    return {w for w in re.findall(r"[^\W_]{3,}", text.lower()) if w not in _STOPWORDS}
+
+
+def _subtitle_heading(h1, soup):
+    """The h2/h3 directly after the h1, if the page's <title> corroborates it as part of the title."""
+    for sibling in h1.next_siblings:
+        if isinstance(sibling, str):
+            if sibling.strip():
+                return None
+            continue
+        if sibling.name not in ("h2", "h3") or not soup.title:
+            return None
+        subtitle_words = _words(sibling.get_text())
+        if subtitle_words & _words(soup.title.get_text()) and not subtitle_words <= _words(h1.get_text()):
+            return sibling
+        return None
+    return None
+
+
 def page_to_markdown(html, page_url, chapter_files=None):
     soup = BeautifulSoup(html, "html5lib")
 
@@ -91,6 +114,10 @@ def page_to_markdown(html, page_url, chapter_files=None):
     h1 = content.find("h1")
     if h1:
         title = _clean(h1.get_text())
+        subtitle = _subtitle_heading(h1, soup)
+        if subtitle:
+            title = f"{title}: {_clean(subtitle.get_text())}"
+            subtitle.decompose()
         h1.decompose()
     for extra in content.find_all("h1"):
         extra.name = "h2"

@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+from web_to_epub.core.boilerplate import strip_shared_blocks
 from web_to_epub.core.charset import decode_html
 from web_to_epub.core.page_markdown import page_to_markdown
 from web_to_epub.core.url_list import chapter_filename, normalize_url
@@ -98,7 +99,27 @@ def fetch_pages(
             results.append(PageFailure(url, f"duplicate of {urls[duplicate_of[i]]}"))
         else:
             results.append(_to_chapter(url, filename, result, chapter_files))
-    return results
+    return _strip_site_chrome(results, chapter_files)
+
+
+def _strip_site_chrome(results, chapter_files):
+    """Remove blocks (nav bars, footers) repeated across most chapters of the batch."""
+    chapters = [r for r in results if isinstance(r, PageChapter)]
+    files = set(chapter_files.values())
+    stripped = strip_shared_blocks(
+        [c.markdown for c in chapters],
+        lambda target: target in files or _key(target) in chapter_files,
+    )
+    replacements = {}
+    for chapter, markdown in zip(chapters, stripped):
+        # A page made only of repeated blocks keeps them rather than becoming empty.
+        if markdown != chapter.markdown and markdown.removeprefix(f"# {chapter.title}").strip():
+            replacements[chapter.filename] = PageChapter(
+                chapter.filename, chapter.url, chapter.title, markdown
+            )
+    return [
+        replacements.get(r.filename, r) if isinstance(r, PageChapter) else r for r in results
+    ]
 
 
 def _key(url: str) -> str:

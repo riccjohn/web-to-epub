@@ -507,3 +507,31 @@ def test_body_wrapped_in_form_keeps_content_and_drops_controls():
     md = _map_convert(html)
     assert "Body text" in md and "Legacy" in md
     assert "secret-field" not in md and "Submit" not in md
+
+
+def test_h1_with_corroborated_subheading_becomes_title_and_subtitle():
+    html = (
+        "<html><head><title>Lesson 4 - The Tarot Spread</title></head>"
+        "<body><h1>LESSON 4</h1><h2>The Spread</h2><p>Text</p></body></html>"
+    )
+    result = page_to_markdown(html, "https://site/l4", None)
+    assert result.title == "LESSON 4: The Spread"
+    assert result.markdown.startswith("# LESSON 4: The Spread\n\nText")
+
+
+def test_section_heading_after_h1_is_not_merged_into_title():
+    html = (
+        "<html><head><title>My Post | Some Blog</title></head>"
+        "<body><h1>My Post</h1><h2>Introduction</h2><p>Text</p></body></html>"
+    )
+    result = page_to_markdown(html, "https://site/post", None)
+    assert result.title == "My Post"
+    assert "## Introduction" in result.markdown
+
+
+def test_subheading_after_intervening_text_is_not_merged():
+    html = (
+        "<html><head><title>A - Overview</title></head>"
+        "<body><h1>A</h1><p>lead</p><h2>Overview</h2><p>Text</p></body></html>"
+    )
+    assert page_to_markdown(html, "https://site/a", None).title == "A"

@@ -67,6 +67,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif p == "/links-old":
             self._send(200, "text/html; charset=utf-8",
                        _page("LO", f'<p><a href="{base}/old">to requested</a></p>'))
+        elif p.startswith("/site"):
+            n = p[len("/site"):]
+            self._send(200, "text/html; charset=utf-8",
+                       _page(f"Site {n}", f"<p>unique text {n}</p><hr>"
+                                          f'<p><a href="{base}/a">Home</a> | <a href="{base}/b">About</a></p>'
+                                          "<p>Copyright Someone</p>"))
         elif p == "/links-empty":
             self._send(200, "text/html; charset=utf-8",
                        _page("LE", f'<p><a href="{base}/empty">to empty</a></p>'))
@@ -244,3 +250,18 @@ def test_two_urls_redirecting_to_one_page_yield_one_chapter(server):
     assert isinstance(first, PageChapter)
     assert isinstance(second, PageFailure)
     assert "duplicate" in second.message
+
+
+def test_site_chrome_repeated_across_chapters_is_removed(server):
+    urls = [f"{server.base}/site{i}" for i in range(4)]
+    results = _run(urls)
+    for i, r in enumerate(results):
+        assert isinstance(r, PageChapter)
+        assert f"unique text {i}" in r.markdown
+        assert "Copyright" not in r.markdown and "Home" not in r.markdown
+        assert not r.markdown.rstrip().endswith("---")
+
+
+def test_chrome_is_kept_when_fewer_than_three_pages_are_fetched(server):
+    results = _run([f"{server.base}/site1", f"{server.base}/site2"])
+    assert all("Copyright Someone" in r.markdown for r in results)
