@@ -16,7 +16,10 @@
 
     <form id="form" novalidate>
       <section aria-labelledby="files-h" class="step">
-        <h2 id="files-h"><span class="step-no" aria-hidden="true">1</span>Chapters</h2>
+        <h2 id="files-h"><span class="step-no" aria-hidden="true">1</span>Add chapters</h2>
+
+        <div class="source" role="group" aria-labelledby="upload-h">
+        <h3 id="upload-h">Upload files</h3>
         <div id="dropzone" class="dropzone" tabindex="0" role="button"
              aria-label="Add chapter files. Drop files here or press Enter or Space to open the file picker."
              aria-describedby="dz-hint">
@@ -30,7 +33,21 @@
         </div>
         <input id="file-input" type="file" multiple hidden accept=".md,.markdown,.txt">
         <p id="file-msg" class="msg warn" role="alert" hidden></p>
+        </div>
 
+        <div class="source" role="group" aria-labelledby="web-h">
+          <h3 id="web-h">From web pages</h3>
+          <p class="hint src-hint" id="web-hint">Enter page addresses (http or https). Each page becomes a chapter, and links between fetched pages are kept.</p>
+          <ul id="url-rows" class="url-rows" aria-describedby="web-hint"></ul>
+          <div class="url-actions">
+            <button type="button" id="add-url-btn" class="add-url" aria-label="Add another URL"><span aria-hidden="true">+</span><span class="add-label"> Add URL</span></button>
+            <button type="button" id="fetch-btn" class="fetch-btn"><span class="spin" aria-hidden="true"></span><span class="label">Fetch pages</span></button>
+          </div>
+          <p id="url-msg" class="msg warn" hidden></p>
+          <ul id="url-errors" class="url-errors" role="alert" hidden></ul>
+        </div>
+
+        <h3 id="list-h" class="list-h">Chapter order</h3>
         <div id="list-tools" class="tools" hidden>
           <span id="count"></span>
           <button type="button" id="sort-btn">Sort naturally</button>

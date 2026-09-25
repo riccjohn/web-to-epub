@@ -7,7 +7,7 @@ name = "web-to-epub"
 version = "0.1.0"
 description = "Convert content to EPUB"
 requires-python = ">=3.12"
-dependencies = ["flask", "ebooklib", "markdown", "nh3"]
+dependencies = ["flask", "ebooklib", "markdown", "nh3", "beautifulsoup4", "html5lib", "markdownify"]
 
 [project.optional-dependencies]
 dev = ["pytest", "hypothesis"]

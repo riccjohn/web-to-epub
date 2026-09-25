@@ -282,3 +282,69 @@ def test_identifier_differs_for_different_content_with_same_title_and_author():
 
 def test_identifier_is_stable_for_identical_input():
     assert _identifier(build_epub([ch("One")], META, {})) == _identifier(build_epub([ch("One")], META, {}))
+
+
+# LINKS
+
+def kch(key, body):
+    return Chapter(title=key, body=body, key=key)
+
+
+def _hrefs(item):
+    return re.findall(r'<a\b[^>]*\shref="([^"]*)"', item.get_content().decode("utf-8"))
+
+
+def _resolve(item, href):
+    return posixpath.normpath(posixpath.join(posixpath.dirname(item.get_name()), href.split("#")[0]))
+
+
+def test_link_to_another_chapter_key_reaches_that_chapters_document():
+    chapters = [kch("a.md", '<h1>A</h1><p><a href="b.md">go b</a></p>'), kch("b.md", "<h1>B</h1><p>text of B</p>")]
+    r = read(build_epub(chapters, META, {}))
+    first, second = r.chapters
+    hrefs = _hrefs(first)
+    assert len(hrefs) == 1, "link to a sibling chapter key must survive as a link"
+    target = _resolve(first, hrefs[0])
+    assert target == second.get_name()
+    assert r.book.get_item_with_href(target) is not None
+    assert "go b" in first.get_content().decode("utf-8")
+
+
+def test_unknown_key_and_other_relative_hrefs_become_plain_text():
+    body = (
+        '<h1>A</h1><p><a href="nope.md">unk</a> <a href="../up.html">rel</a> '
+        '<a href="/abs/path">root</a> <a href="mailto:a@b.c">mail</a></p>'
+    )
+    r = read(build_epub([kch("a.md", body)], META, {}))
+    content = r.chapters[0].get_content().decode("utf-8")
+    assert _hrefs(r.chapters[0]) == []
+    for word in ("unk", "rel", "root", "mail"):
+        assert word in content
+
+
+def test_http_and_https_hrefs_are_untouched():
+    body = '<h1>A</h1><p><a href="https://x.test/y">s</a> <a href="http://x.test/z">p</a></p>'
+    r = read(build_epub([kch("a.md", body)], META, {}))
+    assert _hrefs(r.chapters[0]) == ["https://x.test/y", "http://x.test/z"]
+
+
+_KEYS = ["a.md", "b.md", "c.md"]
+_HREFS = st.sampled_from(
+    _KEYS + ["zzz.md", "../x.html", "/root", "mailto:a@b.c", "https://x.test/p", "http://x.test/q", "javascript:1"]
+)
+
+
+@settings(max_examples=40, deadline=None)
+@given(hrefs=st.lists(st.lists(_HREFS, max_size=4), min_size=1, max_size=3))
+def test_every_href_is_absolute_http_or_resolves_to_a_document_in_the_epub(hrefs):
+    chapters = [
+        kch(_KEYS[i], f"<h1>C{i}</h1>" + "".join(f'<p><a href="{h}">l</a></p>' for h in hs) + "<p>x</p>")
+        for i, hs in enumerate(hrefs)
+    ]
+    r = read(build_epub(chapters, META, {}))
+    names = {i.get_name() for i in r.book.get_items()}
+    for doc in r.chapters:
+        for href in _hrefs(doc):
+            if href.startswith(("http://", "https://")):
+                continue
+            assert _resolve(doc, href) in names, f"dangling href {href!r} in {doc.get_name()}"

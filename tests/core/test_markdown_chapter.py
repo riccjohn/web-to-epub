@@ -133,6 +133,43 @@ def test_substack_linked_image_has_no_wrapping_link():
     assert [i.src for i in ch.images] == ["http://x/i.jpg"]
 
 
+# LINKS
+
+def _anchors(body: str):
+    return _xml(body).findall(".//a")
+
+
+def test_inline_link_becomes_anchor_with_href():
+    ch = parse_chapter("See [the page](https://x/y) now.", "a.md")
+    anchors = _anchors(ch.body)
+    assert [(a.get("href"), a.text) for a in anchors] == [("https://x/y", "the page")]
+
+
+def test_chapter_key_is_filename():
+    assert parse_chapter("# T\n\ntext", "lesson-1.md").key == "lesson-1.md"
+
+
+def test_javascript_and_data_hrefs_are_stripped_to_text():
+    ch = parse_chapter("[bad](javascript:alert(1)) and [worse](data:text/html;base64,AAAA)", "a.md")
+    assert _anchors(ch.body) == []
+    assert "bad" in ch.body and "worse" in ch.body
+    assert "javascript:" not in ch.body
+
+
+def test_anchor_attributes_other_than_href_are_removed():
+    ch = parse_chapter('<a href="https://x/y" onclick="evil()" class="c" target="_blank" id="i">t</a>', "a.md")
+    anchors = _anchors(ch.body)
+    assert len(anchors) == 1
+    assert dict(anchors[0].attrib) == {"href": "https://x/y"}
+
+
+def test_image_wrapped_in_link_keeps_image_and_loses_link():
+    ch = parse_chapter("[![alt](http://x/i.jpg)](http://x/big.jpg)", "a.md")
+    assert _count_img(ch.body) == 1
+    assert _anchors(ch.body) == []
+    assert [i.src for i in ch.images] == ["http://x/i.jpg"]
+
+
 def test_substack_fixture():
     text = (FIXTURES / "substack_chapter.md").read_text()
     ch = parse_chapter(text, "Chapter 01.md", strip_suffix=" - Odinson Games")

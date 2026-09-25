@@ -14,3 +14,4 @@ class Chapter:
     title: str = ""
     body: str = ""
     images: list[ImageRef] = field(default_factory=list)
+    key: str = ''

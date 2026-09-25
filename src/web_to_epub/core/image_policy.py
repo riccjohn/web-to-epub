@@ -12,6 +12,7 @@ IMAGE_EXTENSIONS = {
     "image/gif": "gif",
     "image/webp": "webp",
 }
+PAGE_MEDIA_TYPES = {"text/html", "application/xhtml+xml"}
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,16 @@ def check_response(
 ) -> Verdict:
     if media_type(content_type) not in IMAGE_EXTENSIONS:
         return _deny(f"unsupported image content type: {content_type!r}")
+    if size > max_bytes:
+        return _deny(f"response too large: {size} > {max_bytes}")
+    return _allow()
+
+
+def check_page_response(
+    content_type: str | None, size: int, max_bytes: int = DEFAULT_MAX_BYTES
+) -> Verdict:
+    if media_type(content_type) not in PAGE_MEDIA_TYPES:
+        return _deny(f"unsupported page content type: {content_type!r}")
     if size > max_bytes:
         return _deny(f"response too large: {size} > {max_bytes}")
     return _allow()

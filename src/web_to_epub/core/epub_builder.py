@@ -17,6 +17,8 @@ _IMG_TAG = re.compile(
     r"<figure>(?P<fig_img><img\b[^>]*>)(?P<caption><figcaption>.*?</figcaption>)</figure>|(?P<img><img\b[^>]*>)",
     re.IGNORECASE | re.DOTALL,
 )
+_ANCHOR = re.compile(r"<a\b[^>]*>|</a>", re.IGNORECASE)
+_HREF_ATTR = re.compile(r'\shref="([^"]*)"')
 _SRC_ATTR = re.compile(r'\bsrc="([^"]*)"')
 
 
@@ -94,10 +96,32 @@ def build_epub(
             return f"<figure>{rewritten}{match.group('caption')}</figure>"
         return rewritten
 
+    targets = {c.key: f"chapter{i}.xhtml" for i, c in enumerate(chapters, start=1) if c.key}
+
+    def resolve_links(body: str) -> str:
+        open_anchors: list[bool] = []
+
+        def rewrite_anchor(match: re.Match) -> str:
+            tag = match.group(0)
+            if tag.startswith("</"):
+                return "</a>" if open_anchors.pop() else ""
+            href_match = _HREF_ATTR.search(tag)
+            href = unescape(href_match.group(1)) if href_match else ""
+            if href.startswith(("http://", "https://")):
+                open_anchors.append(True)
+                return tag
+            if href in targets:
+                open_anchors.append(True)
+                return f'<a href="{targets[href]}">'
+            open_anchors.append(False)
+            return ""
+
+        return _ANCHOR.sub(rewrite_anchor, body)
+
     items = []
     for index, chapter in enumerate(chapters, start=1):
         item = epub.EpubHtml(title=chapter.title, file_name=f"text/chapter{index}.xhtml", lang=metadata.language)
-        item.set_content(_IMG_TAG.sub(rewrite, chapter.body))
+        item.set_content(_IMG_TAG.sub(rewrite, resolve_links(chapter.body)))
         item.add_link(href="../style/main.css", rel="stylesheet", type="text/css")
         book.add_item(item)
         items.append(item)
