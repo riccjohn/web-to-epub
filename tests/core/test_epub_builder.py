@@ -348,3 +348,12 @@ def test_every_href_is_absolute_http_or_resolves_to_a_document_in_the_epub(hrefs
             if href.startswith(("http://", "https://")):
                 continue
             assert _resolve(doc, href) in names, f"dangling href {href!r} in {doc.get_name()}"
+
+
+def test_link_to_another_chapter_with_fragment_still_resolves():
+    chapters = [kch("a.md", '<h1>A</h1><p><a href="b.md#part">go b</a></p>'), kch("b.md", "<h1>B</h1><p>B</p>")]
+    r = read(build_epub(chapters, META, {}))
+    first, second = r.chapters
+    hrefs = _hrefs(first)
+    assert len(hrefs) == 1
+    assert _resolve(first, hrefs[0]) == second.get_name()

@@ -10,7 +10,7 @@ Interface under test (web_to_epub.shell.fetch_pages):
     PageChapter(filename, url, title, markdown)   frozen; url is as requested.
     PageFailure(url, message)                     frozen; message is readable.
     Raises ValueError when len(urls) > max_urls (before any fetching).
-    Fetches in batches of max_workers (ThreadPoolExecutor); once the budget is
+    Fetches concurrently (ThreadPoolExecutor, max_workers); once the budget is
     spent, remaining URLs get PageFailure(url, "skipped: fetch budget exhausted").
 """
 
@@ -67,6 +67,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif p == "/links-old":
             self._send(200, "text/html; charset=utf-8",
                        _page("LO", f'<p><a href="{base}/old">to requested</a></p>'))
+        elif p == "/links-empty":
+            self._send(200, "text/html; charset=utf-8",
+                       _page("LE", f'<p><a href="{base}/empty">to empty</a></p>'))
+        elif p == "/to-empty-final":
+            self._send(302, "text/plain", b"", {"Location": "/new/a"})
         elif p.startswith("/slow"):
             time.sleep(0.6)
             self._send(200, "text/html; charset=utf-8", _page("Slow", "<p>s</p>"))
@@ -215,3 +220,27 @@ def test_concurrency_is_bounded_by_max_workers(server):
     assert len(results) == 6
     assert all(isinstance(r, PageChapter) for r in results)
     assert server.max_inflight == 2
+
+
+def test_link_to_a_page_that_fails_conversion_stays_a_working_url(server):
+    urls = [f"{server.base}/links-empty", f"{server.base}/empty"]
+    linker, failed = _run(urls)
+    assert isinstance(failed, PageFailure)
+    assert f"({server.base}/empty)" in linker.markdown
+
+
+def test_redirect_to_another_listed_page_yields_one_chapter(server):
+    urls = [f"{server.base}/old", f"{server.base}/new/a", f"{server.base}/links-final"]
+    old, new, lf = _run(urls)
+    assert isinstance(old, PageFailure)
+    assert urls[1] in old.message
+    assert isinstance(new, PageChapter)
+    assert f"({new.filename})" in lf.markdown  # link goes to the page's own chapter
+
+
+def test_two_urls_redirecting_to_one_page_yield_one_chapter(server):
+    urls = [f"{server.base}/old", f"{server.base}/to-empty-final"]
+    first, second = _run(urls)
+    assert isinstance(first, PageChapter)
+    assert isinstance(second, PageFailure)
+    assert "duplicate" in second.message

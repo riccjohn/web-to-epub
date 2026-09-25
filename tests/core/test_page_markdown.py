@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+import pytest
 from hypothesis import given, settings, strategies as st
 
 from web_to_epub.core.page_markdown import page_to_markdown
@@ -465,3 +466,44 @@ def test_exactly_one_level_one_heading_for_any_number_of_h1s(titles):
     assert len(_level1_lines(md)) == 1
     for t in titles[1:]:
         assert f"## {t}" in md
+
+
+MALFORMED_HREFS = ["http://host:abc/", "http://host:99999/", "http://", "https:///x", "http://[::1"]
+
+
+@pytest.mark.parametrize("href", MALFORMED_HREFS)
+@pytest.mark.parametrize("files", [None, FILES])
+def test_malformed_link_becomes_plain_text_instead_of_failing_the_page(href, files):
+    html = f'<body><p>before <a href="{href}">bad</a> <a href="less2.htm">good</a></p></body>'
+    md = _map_convert(html, files)
+    assert "bad" in md and "good" in md
+    if files:  # links are only validated when they are matched against chapters
+        assert href not in md
+
+
+@pytest.mark.parametrize("src", MALFORMED_HREFS)
+def test_malformed_image_src_does_not_fail_the_page(src):
+    md = _map_convert(f'<body><p>text</p><img src="{src}" alt="pic"></body>')
+    assert "text" in md
+
+
+def test_article_header_h1_is_the_title():
+    html = "<body><article><header><h1>Real Title</h1></header><p>Body text</p></article></body>"
+    result = page_to_markdown(html, "https://site/a", None)
+    assert result.title == "Real Title"
+    assert "Body text" in result.markdown
+
+
+def test_page_level_header_outside_content_landmark_is_still_removed():
+    html = "<body><header>Site Logo</header><p>Body text</p></body>"
+    assert "Site Logo" not in _map_convert(html)
+
+
+def test_body_wrapped_in_form_keeps_content_and_drops_controls():
+    html = (
+        '<body><form action="/x"><h1>Legacy</h1><p>Body text</p>'
+        '<input type="text" value="secret-field"><button>Submit</button></form></body>'
+    )
+    md = _map_convert(html)
+    assert "Body text" in md and "Legacy" in md
+    assert "secret-field" not in md and "Submit" not in md

@@ -81,3 +81,14 @@ def test_invalid_bytes_for_declared_charset_do_not_raise():
 @given(st.binary(), st.one_of(st.none(), st.text()))
 def test_always_returns_str(data, header):
     assert isinstance(decode_html(data, header), str)
+
+
+def test_utf16_boms_are_decoded():
+    text = "<p>café ☕</p>"
+    assert decode_html(b"\xff\xfe" + text.encode("utf-16-le"), None) == text
+    assert decode_html(b"\xfe\xff" + text.encode("utf-16-be"), "text/html") == text
+
+
+def test_utf32_bom_is_not_mistaken_for_utf16():
+    text = "café"
+    assert decode_html(b"\xff\xfe\x00\x00" + text.encode("utf-32-le"), None) == text

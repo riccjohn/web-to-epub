@@ -226,3 +226,8 @@ def test_clean_url_list_dedupes_entries_differing_only_by_credentials():
         ["https://a:b@example.com/p", "https://c:d@example.com/p", "https://example.com/p"]
     )
     assert res.urls == ["https://example.com/p"]
+
+
+def test_chapter_filenames_differ_for_urls_sharing_a_long_prefix():
+    prefix = "https://example.com/" + "a" * 60
+    assert chapter_filename(0, prefix + "/one") != chapter_filename(0, prefix + "/two")

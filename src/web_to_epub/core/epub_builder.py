@@ -110,9 +110,10 @@ def build_epub(
             if href.startswith(("http://", "https://")):
                 open_anchors.append(True)
                 return tag
-            if href in targets:
+            target = targets.get(href.partition("#")[0])
+            if target:
                 open_anchors.append(True)
-                return f'<a href="{targets[href]}">'
+                return f'<a href="{target}">'
             open_anchors.append(False)
             return ""
 

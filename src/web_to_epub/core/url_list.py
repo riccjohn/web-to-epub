@@ -1,5 +1,6 @@
 """URL list cleaning, normalization, and chapter filename derivation."""
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit, urlunsplit
@@ -36,7 +37,9 @@ def normalize_url(url: str) -> str:
 
 def chapter_filename(index: int, url: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", url.lower()).strip("-")[:50].strip("-")
-    return f"{index:03d}-{slug or 'chapter'}.md"
+    # The slug is truncated, so the hash keeps different URLs from sharing a name.
+    digest = hashlib.sha1(url.encode("utf-8", errors="replace")).hexdigest()[:8]
+    return f"{index:03d}-{slug or 'chapter'}-{digest}.md"
 
 
 def clean_url_list(entries: list[str], max_count: int = 50) -> UrlListResult:
