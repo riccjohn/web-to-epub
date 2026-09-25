@@ -323,9 +323,7 @@
     urlErrors.hidden = errs.length === 0;
   }
 
-  function fetchPages() {
-    if (fetching) return;
-    show(urlMsg, ""); showErrors([]);
+  function collectUrls() {
     var seen = {}, urls = [], skipped = [];
     rowInputs().forEach(function (inp) {
       var u = inp.value.trim();
@@ -334,15 +332,23 @@
       if (items.some(function (it) { return it.url === u; })) skipped.push(u);
       else urls.push(u);
     });
+    return { urls: urls, skipped: skipped };
+  }
+
+  // Resolves to the number of URLs that failed (0 = everything typed was fetched or already added).
+  function fetchPages() {
+    if (fetching) return Promise.resolve(1);
+    show(urlMsg, ""); showErrors([]);
+    var collected = collectUrls(), urls = collected.urls, skipped = collected.skipped;
     if (!urls.length) {
       show(urlMsg, skipped.length ? "Already added: " + skipped.join(", ") + "." : "Enter at least one URL to fetch.");
       if (!skipped.length) rowInputs()[0].focus();
-      return;
+      return Promise.resolve(0);
     }
     setFetching(true);
     announce("Fetching " + urls.length + (urls.length === 1 ? " page" : " pages"));
 
-    fetch("/fetch", { method: "POST", headers: { "Content-Type": "application/json" },
+    return fetch("/fetch", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ urls: urls }) }).then(function (resp) {
       return resp.json().then(function (j) { return { ok: resp.ok, status: resp.status, j: j }; },
         function () { return { ok: false, status: resp.status, j: null }; });
@@ -374,12 +380,14 @@
       announce("Fetched " + n + (n === 1 ? " page" : " pages") +
         (errs.length ? ", " + errs.length + " failed" : "") + ".");
       if (errs.length || !n) rowInputs()[0].focus();
+      return errs.length || (n ? 0 : 1);
     }).catch(function (err) {
       var msg = err instanceof TypeError ? "Could not reach the server." : err.message;
       show(urlMsg, msg); announce("Fetch failed. " + msg);
-    }).then(function () { setFetching(false); });
+      return 1;
+    }).then(function (failed) { setFetching(false); return failed; });
   }
-  fetchBtn.addEventListener("click", fetchPages);
+  fetchBtn.addEventListener("click", function () { fetchPages(); });
   addRow("", false);
 
   // Build
@@ -425,6 +433,24 @@
 
     if (!$("title").value.trim()) return fail("A title is required", $("title"));
     if (!$("author").value.trim()) return fail("An author is required", $("author"));
+
+    // URLs typed but not fetched yet are fetched now, so Build never silently ignores them.
+    if (collectUrls().urls.length) {
+      if (fetching) return;
+      setBuilding(true);
+      show(statusEl, "Fetching pages...");
+      fetchPages().then(function (failed) {
+        setBuilding(false);
+        show(statusEl, "");
+        if (failed) return fail("Some pages could not be fetched. Fix or remove them, then build again.");
+        buildBook();
+      });
+      return;
+    }
+    buildBook();
+  });
+
+  function buildBook() {
     if (!items.length) return fail("Add at least one chapter (upload a file or fetch a web page)", dz);
 
     var fd = new FormData();
@@ -468,7 +494,7 @@
     }).then(function () {
       setBuilding(false);
     });
-  });
+  }
 
   render();
 })();
